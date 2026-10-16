@@ -611,45 +611,25 @@ bool
 parse_nsh(const void **datap, size_t *sizep, struct ovs_key_nsh *key)
 {
     const struct nsh_hdr *nsh = (const struct nsh_hdr *) *datap;
-    uint8_t version, length, flags, ttl;
 
-    /* Check if it is long enough for NSH header, doesn't support
-     * MD type 2 yet
-     */
-    if (OVS_UNLIKELY(*sizep < NSH_BASE_HDR_LEN)) {
+    if (OVS_UNLIKELY(!nsh_hdr_is_valid(nsh, *sizep))) {
         return false;
     }
 
-    version = nsh_get_ver(nsh);
-    flags = nsh_get_flags(nsh);
-    length = nsh_hdr_len(nsh);
-    ttl = nsh_get_ttl(nsh);
-
-    if (OVS_UNLIKELY(length > *sizep || version != 0)) {
-        return false;
-    }
-
-    key->flags = flags;
-    key->ttl = ttl;
+    key->flags = nsh_get_flags(nsh);
+    key->ttl = nsh_get_ttl(nsh);
     key->mdtype = nsh->md_type;
     key->np = nsh->next_proto;
     key->path_hdr = nsh_get_path_hdr(nsh);
 
     switch (key->mdtype) {
         case NSH_M_TYPE1:
-            if (length != NSH_M_TYPE1_LEN) {
-                return false;
-            }
             for (size_t i = 0; i < 4; i++) {
                 key->context[i] = get_16aligned_be32(&nsh->md1.context[i]);
             }
             break;
         case NSH_M_TYPE2:
             /* Don't support MD type 2 metedata parsing yet */
-            if (length < NSH_BASE_HDR_LEN) {
-                return false;
-            }
-
             memset(key->context, 0, sizeof(key->context));
             break;
         default:
@@ -658,7 +638,7 @@ parse_nsh(const void **datap, size_t *sizep, struct ovs_key_nsh *key)
             break;
     }
 
-    data_pull(datap, sizep, length);
+    data_pull(datap, sizep, nsh_hdr_len(nsh));
 
     return true;
 }
