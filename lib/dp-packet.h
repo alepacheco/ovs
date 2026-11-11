@@ -1274,7 +1274,7 @@ dp_packet_ip_set_header_csum(struct dp_packet *p, bool inner)
 
     ip_len = IP_IHL(ip->ip_ihl_ver) * 4;
 
-    if (OVS_LIKELY(ip_len >= IP_HEADER_LEN && ip_len < l3_size)) {
+    if (OVS_LIKELY(ip_len >= IP_HEADER_LEN && ip_len <= l3_size)) {
         ip->ip_csum = 0;
         ip->ip_csum = csum(ip, ip_len);
     }

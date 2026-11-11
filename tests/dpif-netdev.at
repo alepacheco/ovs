@@ -1084,17 +1084,26 @@ dnl eth(dst=aa:aa:aa:aa:aa:aa,src=bb:bb:bb:bb:bb:bb,type=0x0800)
 dnl ipv4(dst=10.0.0.2,src=10.0.0.1,proto=1,len=60,tot_len=68,csum=0xeeee)
 [4f000044abab00004001eeee0a0000010a000002]))
 
+dnl IP header without payload.
+m4_define([HDR_ONLY_PKT], m4_join([],
+dnl eth(dst=aa:aa:aa:aa:aa:aa,src=bb:bb:bb:bb:bb:bb,type=0x0800)
+[aaaaaaaaaaaabbbbbbbbbbbb0800],
+dnl ipv4(dst=10.0.0.2,src=10.0.0.1,proto=59,len=20,tot_len=20,csum=0xeeee)
+[45000014abab0000403beeee0a0000010a000002]))
+
 AT_CHECK([ovs-vsctl set Interface p1 options:ol_ip_rx_csum_set_good=true])
 AT_CHECK([ovs-appctl netdev-dummy/receive p1 OPT_PKT])
 AT_CHECK([ovs-appctl netdev-dummy/receive p1 MICROGRAM])
+AT_CHECK([ovs-appctl netdev-dummy/receive p1 HDR_ONLY_PKT])
 AT_CHECK([ovs-pcap p2.pcap > p2.pcap.txt 2>&1])
 
-dnl Build the expected modified packets.  The first packet has a valid IPv4
-dnl checksum and modified destination IP address.  The second packet isn't
-dnl expected to change.
+dnl Build the expected modified packets.  The first and third packets have a
+dnl valid IPv4 checksum and modified destination IP address.  The second
+dnl packet isn't expected to change.
 AT_CHECK([echo "OPT_PKT" | sed -e "s/0a000002/c0a80101/" -e "s/eeee/dd2e/" > expout])
 AT_CHECK([echo "MICROGRAM" >> expout])
-AT_CHECK([tail -n 2 p2.pcap.txt], [0], [expout])
+AT_CHECK([echo "HDR_ONLY_PKT" | sed -e "s/0a000002/c0a80101/" -e "s/eeee/035a/" >> expout])
+AT_CHECK([tail -n 3 p2.pcap.txt], [0], [expout])
 
 OVS_VSWITCHD_STOP
 AT_CLEANUP
@@ -1274,6 +1283,29 @@ AT_CHECK([ovs-ofctl add-flow br0 \
           in_port=p1,tcp,actions='output(port=p2,max_len=30)'])
 AT_CHECK([ovs-vsctl set Interface p1 options:ol_ip_rx_csum_set_partial=true])
 CHECK_FWD_PACKET(p1, p2, ol_l4_rx_csum_set_partial, [good_frame], [trunc_l3])
+AT_CHECK([ovs-vsctl remove Interface p1 options ol_ip_rx_csum_set_partial])
+
+dnl Output cut to 34 bytes, right after the IPv4 header.  The header checksum,
+dnl zero in the received frame, is completed.
+AT_DATA([zero_ip_csum_frame], m4_join([],
+[0a8f394fe0738abf7e2f05840800],
+[450000680000000000060000c0a87b02c0a87b01],
+[d47814510000000000000000501000006b720000],
+[000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f],
+[202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f]
+))
+
+AT_DATA([trunc_ip_hdr], m4_join([],
+[0a8f394fe0738abf7e2f05840800],
+[45000068000000000006433cc0a87b02c0a87b01]
+))
+
+AT_CHECK([ovs-ofctl del-flows br0])
+AT_CHECK([ovs-ofctl add-flow br0 \
+          in_port=p1,tcp,actions='output(port=p2,max_len=34)'])
+AT_CHECK([ovs-vsctl set Interface p1 options:ol_ip_rx_csum_set_partial=true])
+CHECK_FWD_PACKET(p1, p2, ol_l4_rx_csum_set_partial, [zero_ip_csum_frame],
+                 [trunc_ip_hdr])
 AT_CHECK([ovs-vsctl remove Interface p1 options ol_ip_rx_csum_set_partial])
 
 OVS_VSWITCHD_STOP
